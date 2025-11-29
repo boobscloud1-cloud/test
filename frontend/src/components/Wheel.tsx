@@ -27,19 +27,6 @@ export const Wheel: React.FC<WheelProps> = ({ telegramId, onSpinEnd, onError }) 
     { label: '1000 pts' },  // 315°
   ];
 
-  // Map backend prize to its base wedge angle for consistent visual alignment
-  const prizeAngleMap = (type: string, value: string): number => {
-    if (type === 'spins' && value === '1') return 0;
-    if (type === 'points' && value === '100') return 45;
-    if (type === 'points' && value === '500') return 90;
-    if (type === 'spins' && value === '5') return 135;
-    if (type === 'item' && value === 'iphone') return 180;
-    if (type === 'points' && value === '50') return 225;
-    if (type === 'spins' && value === '2') return 270;
-    if (type === 'points' && value === '1000') return 315;
-    return 0;
-  };
-
   const handleSpin = async () => {
     if (isSpinning) return;
     setIsSpinning(true);

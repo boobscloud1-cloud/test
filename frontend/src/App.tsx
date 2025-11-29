@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import WebApp from '@twa-dev/sdk';
 import { getUser } from './requests/api';
 import { Wheel } from './components/Wheel';
