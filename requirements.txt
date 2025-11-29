@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+sqlalchemy
+aiosqlite
+pydantic
+pydantic-settings
+python-dotenv
+aiogram
+asyncpg
+python-jose[cryptography]
+passlib[bcrypt]
+python-multipart
+requests
