@@ -1,0 +1,120 @@
+Security Improvement Plan for Wheel of Fortune Telegram MiniApp
+
+Overview
+This plan consolidates implemented changes and defines the remaining prioritized actions to fully harden the backend API and improve stability and scalability. Items are split into phases with concrete backend/frontend tasks, acceptance criteria, and operational notes.
+
+Status Summary (Implemented)
+- Atomic game operations:
+  - /game/spin: atomic decrement via conditional UPDATE (WHERE spins > 0).
+  - /game/buy_spins: atomic deduction via conditional UPDATE (WHERE points >= cost) and separate increment.
+- RNG integrity: switched to secrets-based randomness and integer-weight selection.
+- Input validation: bounds on telegram_id, buy amount, and task postback params (min/max length and payout range).
+- Secret/logging hygiene: removed token prints, added ALLOW_ORIGINS and SQL_ECHO toggles, allow_credentials=False by default.
+- Data integrity: DB CheckConstraints for non-negative spins and points (requires migration to apply on existing DB).
+- Telegram initData verification: /auth/verify implemented with HMAC validation (security.py).
+
+Critical Gap Remaining
+- Authentication/Authorization: Endpoints still trust caller-supplied telegram_id; JWT is not issued nor enforced. This allows parameter tampering and account takeover until fixed.
+
+Phase A — Enforce Authentication via JWT (Priority: Critical)
+Goal: Derive user identity from a validated token; remove reliance on telegram_id in requests.
+
+Backend Tasks
+1) Issue JWT on /auth/verify:
+   - On successful initData verification, sign a JWT with SECRET_KEY (HS256).
+   - Claims: sub=telegram_id, iat, exp (10–30 minutes), jti (optional).
+   - Response: { user: UserResponse, token: <jwt> }.
+
+2) Add dependency get_current_user_from_jwt:
+   - Read Authorization: Bearer <jwt>.
+   - Verify signature and expiration; extract sub (telegram_id).
+   - Load user by telegram_id; raise 401 if invalid.
+
+3) Enforce auth on sensitive endpoints:
+   - /game/spin: remove telegram_id query param; use current_user from dependency.
+   - /game/buy_spins: same as above.
+   - /users/me: add a new endpoint to return the authenticated user profile.
+   - Optionally keep legacy ?telegram_id for dev via FEATURE_FLAG; log warnings and remove for prod.
+
+Frontend Tasks
+4) Integrate Telegram auth:
+   - On app load, read window.Telegram.WebApp.initData and POST to /auth/verify.
+   - Store JWT (memory preferred; localStorage acceptable if required).
+   - Add axios interceptor to set Authorization: Bearer <token> for API calls.
+   - Update API calls to remove telegram_id param (use /users/me to get identity).
+
+Acceptance Criteria
+- Requests with tampered telegram_id params no longer affect other accounts.
+- Unauthenticated calls to /game/spin and /game/buy_spins return 401.
+- Token refresh strategy defined (re-POST initData if token expires).
+
+Phase B — Integrity, Fairness, and Precision (Priority: High/Medium)
+B1) Prize matrix integrity:
+- Add startup validation in game router to ensure sum of PRIZES probabilities ≈ 1.0 (epsilon tolerance).
+- Consider moving PRIZES to DB with admin UI; enforce integrity constraints (sum=1.0, non-negative).
+
+B2) Points precision:
+- Migrate points from Float to Decimal/Numeric(12,2) in SQLAlchemy models and Pydantic schemas.
+- Provide Alembic migration; handle serialization in API responses.
+
+B3) Postback hardening:
+- Replace simple string compare with hmac.compare_digest for CPA_SECRET_TOKEN comparisons.
+- Add IP allowlisting for known CPA networks (if feasible).
+- If supported by provider, implement request signing (HMAC) and verify signature server-side.
+- Cap spin awards from payout (guardrails already added; maintain/review thresholds).
+
+Acceptance Criteria
+- Backend fails fast if PRIZES invalid.
+- No floating-point drift in points; math precise to two decimals.
+- Postback endpoints reject requests from unapproved IPs/signatures; no secret leakage in logs.
+
+Phase C — Scalability and Platform Robustness (Priority: Medium/Long-term)
+C1) Migrate to PostgreSQL:
+- Use asyncpg / async SQLAlchemy engine.
+- Use SELECT ... FOR UPDATE and RETURNING where needed.
+- Revisit result.rowcount behavior and rely on RETURNING for correctness.
+
+C2) Alembic migrations:
+- Add migrations for CheckConstraints and Decimal points; enforce schema changes in a forward/backward compatible way.
+
+C3) Rate limiting and anti-abuse:
+- Add per-user and global rate limits (e.g., Redis sliding window) for /game/spin and /game/buy_spins.
+- Optionally throttle spins per second and introduce cool-downs.
+
+C4) Schema constraints:
+- Add DB length limits (e.g., transaction_id, offer_id, click_id: VARCHAR(128)).
+- Add Pydantic constr(max_length=...) across schemas for inputs to prevent bloat/DoS.
+
+Operational Runbook and Security Hygiene
+- CORS: Set ALLOW_ORIGINS to exact production domain(s). Keep allow_credentials=False unless cookie auth introduced.
+- Secrets Rotation: If backend/.env was ever committed, rotate BOT_TOKEN, SECRET_KEY, CPA_SECRET_TOKEN; ensure .env in .gitignore.
+- Logging: Keep SQL_ECHO=false in production and avoid logging secrets or full payloads from postbacks.
+- Monitoring: Add structured logs on spin/buy outcomes, failed auth attempts, postback dedupe behavior and anomalies.
+
+Testing Checklist
+- Auth
+  - /auth/verify issues valid JWT; tampered token rejected; expired token triggers 401.
+  - /game/spin and /game/buy_spins reject unauthenticated and ignore arbitrary telegram_id params.
+
+- Concurrency
+  - Concurrent spin attempts cannot reduce spins below zero.
+  - Buy spins fails atomically with insufficient points under concurrent requests.
+
+- Integrity
+  - PRIZES sum validated at startup; negative or over-100% probabilities rejected.
+  - Points operations retain exact precision after migration to Decimal/Numeric.
+
+- Postbacks
+  - Duplicate transaction_id ignored; replay returns "duplicate".
+  - Invalid token/IP/signature blocked without secret disclosure.
+
+- Scalability
+  - With PostgreSQL, no global DB lock on concurrent writes; row-level locking effective.
+
+Timeline (Suggested)
+- Phase A: 1–2 days (backend JWT + frontend integration).
+- Phase B: 1–3 days (validation, Decimal migration, postback hardening).
+- Phase C: 3–7 days (PostgreSQL, migrations, rate limiting, constraints).
+
+Notes on SQLite
+- Current atomic updates reduce race risks, but SQLite remains a write-serialized store; high concurrency will still face lock contention. PostgreSQL strongly recommended for production.

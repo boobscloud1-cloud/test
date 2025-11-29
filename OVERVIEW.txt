@@ -1,0 +1,61 @@
+# Wheel of Fortune Telegram MiniApp - System Overview
+
+## 1. Architecture
+This project is a full-stack Telegram MiniApp designed for high-concurrency user interaction, specifically centered around a "Spin the Wheel" mechanic fueled by CPA (Cost Per Action) task completions.
+
+### Backend (Python / FastAPI)
+- **Framework:** FastAPI (High performance, Async I/O).
+- **Database:** SQLAlchemy + aiosqlite (Async SQLite for dev, easily swappable to PostgreSQL for prod).
+- **Role:** Acts as the source of truth. It handles:
+  - User Authentication (Telegram `initData` verification).
+  - Game Logic (Weighted RNG for wheel spins).
+  - Task Verification (Postback handling from CPA networks).
+  - Referral System (Tree structure and reward distribution).
+
+### Frontend (React / Vite)
+- **Framework:** React with TypeScript.
+- **Integration:** `@twa-dev/sdk` for native Telegram interaction (User ID retrieval, haptic feedback, closing app).
+- **UI:** Uses `framer-motion` for smooth Physics-based wheel animations controlled by backend results.
+
+## 2. Key Workflows
+
+### A. The Spin Mechanic
+1. **User** clicks "Spin".
+2. **Frontend** sends request to `POST /game/spin`.
+3. **Backend**:
+   - Checks if User has spins > 0.
+   - Atomically decrements spin balance.
+   - Calculates result based on fixed probability matrix (e.g., 0.1% Jackpot).
+   - Commits transaction and returns the `angle` and `prize` to frontend.
+4. **Frontend** spins the wheel to the specific `angle`.
+
+### B. CPA Task Completion
+1. **User** browses `TaskList` in the app.
+2. **User** clicks a task and is redirected to a generic CPA URL (simulated).
+   - URL Format: `network.com/offer?sub_id={TELEGRAM_ID}`.
+3. **User** completes the action (install app, survey, etc.).
+4. **CPA Network** fires a server-to-server "Postback" to your backend:
+   - `GET /tasks/postback?sub_id=123&token=SECRET`
+5. **Backend** verifies the token, finds the user, awards spins, and checks if this qualifies a referrer for a bonus.
+
+### C. Referrals
+- Users have unique invite links: `t.me/YourBot?start={USER_ID}`.
+- When a new user joins via this link, the backend records the relationship.
+- Rewards are issued only when the invited user completes a "Qualifying Action" (e.g., first Task), preventing bot spam.
+
+## 3. File Structure
+
+### `backend/`
+- `app/main.py`: Application entry point.
+- `app/models.py`: Database tables definition.
+- `app/routers/`:
+  - `game.py`: Spin logic and RNG.
+  - `tasks.py`: Postback endpoints.
+  - `users.py`: Profile management.
+- `app/schemas.py`: API Data models (Pydantic).
+
+### `frontend/`
+- `src/App.tsx`: Main application wrapper and Auth logic.
+- `src/components/Wheel.tsx`: Visual component for the game.
+- `src/components/TaskList.tsx`: List of tasks and referral UI.
+- `src/requests/api.ts`: Axios setup for communicating with backend.

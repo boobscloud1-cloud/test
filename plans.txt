@@ -1,0 +1,105 @@
+# Future Development & Deployment Roadmap
+
+This document outlines the next steps to take this project from a functional MVC prototype to a production-ready, scalable business.
+
+---
+
+## Phase 1: The Telegram Bot (Conversational Layer)
+
+While the MiniApp handles the UI, the Bot is the entry point and notification system.
+
+### 1.1. Implementation Plan (`aiogram` Library)
+You need a separate Python process (or integrated into FastAPI via Webhooks) to handle chat interactions.
+- **Entry Point (`/start`):**
+  - Parse the start payload: `/start ref_123`.
+  - Send a welcome message with a flashy image.
+  - **IMPORTANT:** Provide a prominent "Play Now" inline button that launches the MiniApp (`web_app={"url": "..."}`).
+- **Deep Linking:**
+  - When a user clicks a referral link, the bot must capture the `ref_` parameter and store it in the DB (via API call to Backend) even before they open the MiniApp.
+- **Notifications:**
+  - **Spin Earned:** Send a message: "🎉 You earned 3 spins from completing a task!"
+  - **Daily Reminder:** Cron job to ping users who haven't played in 24h.
+
+### 1.2. Suggested Code Structure
+Create a `bot/` folder:
+- `bot.py`: Main polling loop.
+- `handlers.py`: Message handlers.
+- `middlewares.py`: Anti-spam throttling.
+
+---
+
+## Phase 2: Admin Management & Statistics
+
+You need a way to control the app without touching the database directly.
+
+### 2.1. Admin Dashboard (Web Interface)
+Extend the React Frontend with a protected `/admin` route (Login required).
+- **Key Features:**
+  - **User Management:** Search by ID, Ban/Unban, manually add/remove spins.
+  - **Task Manager:** form to Create/Edit CPA tasks (name, provider, reward count, active status).
+  - **Stats Overview:**
+    - Total Users
+    - Tasks Completed (Last 24h)
+    - Revenue (Estimated based on CPA payouts)
+    - Spins Consumed
+    - Total Winners of Some Prize
+
+### 2.2. Admin Bot Commands
+For quick checks on the go:
+- `/stats`: Sends a text summary of today's performance.
+- `/broadcast <message>`: Sends a mass message to all users (Use carefully).
+- `/add_spins <id> <amount>`: Emergency credit.
+
+---
+
+## Phase 3: Production Deployment
+
+Moving from `localhost` to the internet.
+
+### 3.1. Server Requirements
+- **VPS:** DigitalOcean Droplet, AWS EC2, or Hetzner (cheaper).
+  - Specs: 2 vCPU, 4GB RAM (Minimum for smooth concurrent performance).
+- **OS:** Ubuntu 22.04 LTS.
+
+### 3.2. Domain & SSL
+1. **Buy a Domain:** (e.g., `wheel-game.com`).
+2. **DNS:** Point `A Record` (@) to your VPS IP.
+3. **SSL (HTTPS):** Absolutely required for Telegram MiniApps.
+   - Use **Certbot** (Let's Encrypt) for free auto-renewing certificates.
+
+### 3.3. Containerization (Docker)
+Wrap your apps to run anywhere consistently.
+- **Backend Dockerfile:** Python base image, install requirements, run Uvicorn.
+- **Frontend Dockerfile:** Node base, build React app, serve static files via Nginx (or use a separate Nginx container).
+- **Database:** Run PostgreSQL in a Docker container.
+- **Orchestration:** Use `docker-compose.yml` to bring up Backend + Frontend + DB + Redis with one command.
+
+### 3.4. Nginx Reverse Proxy
+Set up Nginx on the host to route traffic:
+- `https://yourdomain.com/api` -> Forward to Backend Container (Port 8000).
+- `https://yourdomain.com/` -> Forward to Frontend Container (Port 80/Static).
+
+---
+
+## Phase 4: Security & Integrity (Critical)
+
+### 4.1. Telegram Validation
+Currently, the app mocks auth. In production:
+- The Frontend must send the raw `window.Telegram.WebApp.initData` string to the JWT backend.
+- The Backend must verify the cryptographic signature using your `BOT_TOKEN`.
+- **Why:** Prevents users from spoofing IDs and stealing accounts.
+
+### 4.2. Rate Limiting & Anti-Cheat
+- **Redis Integration:** Install Redis.
+- **Limiters:**
+  - Limit api `/spin` to 1 request per 3 seconds per user (prevents button mashing exploits).
+  - Limit `/postback` checks to prevent replay attacks from CPA networks (though `transaction_id` uniqueness handles most of this).
+- **IP Validation:** Ensure CPA postbacks come from whitelisted IP addresses of the ad network.
+
+---
+
+## Phase 5: Advanced Features (Scaling)
+
+- **Leaderboard:** "Top Winners this Week" (Builds viral competition).
+- **Tiers/Levels:** "Complete 10 tasks to unlocking the Gold Wheel (Higher Jackpot)".
+- **Crypto Withdrawals:** Integrate TON Connect to allow users to withdraw points as USDT or Jettons (requires strict AML checks).
